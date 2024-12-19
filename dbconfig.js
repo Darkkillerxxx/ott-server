@@ -9,7 +9,8 @@ var connection = mysql.createConnection({
     ssl: {
         // Use 'Amazon RDS' for SSL with AWS databases, or provide cert if required
         rejectUnauthorized: true  // This ensures SSL certificate is validated
-    }
+    },
+    connectionLimit: 10, // Number of connections in the pool
 });
 
 connection.connect((err) => {
