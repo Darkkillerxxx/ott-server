@@ -22,6 +22,95 @@ const storage = multer.diskStorage({
 // Initialize multer with storage configuration
 const upload = multer({ storage: storage });
 
+router.post('/uploadEpisode', 
+    upload.fields([
+        { name: 'stillImageFile', maxCount: 1 }, 
+    ]), async (req, res) => {
+    try {
+        const { seriesId, seasonId, title, description, availabilityType, stillImageUrl} = req.body;
+        console.log(req.body); // Contains form data like trailerType, videoType, etc.
+        console.log(req.files); // Contains the uploaded files
+
+        // Prepare video URLs for the uploaded files
+        let episodeStillUrl = '';
+
+        if (req.files.stillImageFile) {
+            episodeStillUrl = `/uploads/${req.files.stillImageFile[0].filename}`;
+        }
+        else{
+            episodeStillUrl = stillImageUrl;
+        }
+     
+        // Insert the data into the database
+      
+        const query = `
+            INSERT INTO episodes 
+            (seriesId, seasonId, title, description, availabilityType, stillImageUrl)
+            VALUES
+            (${seriesId},'${seasonId}', '${title}', '${description}', '${availabilityType}', '${episodeStillUrl}');
+        `;
+
+        const result = await queryData(query);
+
+        res.status(200).json({ message: 'Episodes Fetch Successfully!',episodesId:result.insertId });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'An error occurred during the file upload' });
+    }
+});
+
+router.get('/getSeriesList',async(req,res)=>{
+    try{
+        const { user_id } = req.user;
+
+        const query = `SELECT 
+                        s.id AS ShowId,
+                        s.contentTypeId,
+                        s.ownerId,
+                        s.showTypeId,
+                        se.SeriesId,
+                        se.SeriesName,
+                        se.SeriesDescription,
+                        se.Genre,
+                        se.Language,
+                        se.cast,
+                        se.Producer,
+                        se.Director,
+                        se.PilotAirDate,
+                        se.thumbnailUrl,
+                        se.landscapeUrl,
+                        se.ExternalId
+                    FROM 
+                        shows s
+                    INNER JOIN 
+                        series se ON s.id = se.ShowId
+                    WHERE 
+                        s.ownerId = ${user_id}`;
+        
+        const result = await queryData(query);
+
+        res.status(200).json({ message: 'Episodes Fetch Successfully!',data:result});
+    }
+    catch(error){
+        console.log(error);
+        res.status(500).json({message:'An error occured during fetching series'})
+    }
+})
+
+router.get('/getEpisodeListForSeason/:seasonId',async(req,res)=>{
+    try{        
+        const { seasonId } = req.params;
+
+        const query = `SELECT * FROM episodes WHERE seasonId = ${seasonId}`;
+
+        const result = await queryData(query);
+        res.status(200).json({ message: 'Files uploaded and data saved successfully!',data:result });
+    }
+    catch(error){
+        res.status(500).json({message:'An Error occured while fetching episodes'});
+    }
+})
+
 router.post('/uploadContent', 
     upload.fields([
         { name: 'trailerFile', maxCount: 1 }, 
@@ -69,12 +158,13 @@ router.post('/uploadContent',
 
         // Insert the data into the database
         const showId = req.body.showId; // Get showId from the form data
-      
+        const episodeId = req.body.episodeId;
+
         const query = `
             INSERT INTO showContent 
-            (showId, trailerUrl, youtubeId360p, youtubeId480p, youtubeId720p, externalUrl, url360p, url480p, url720p, thumbnailUrl, imageUrl, trailerfileUrl, traileryoutubeUrl)
+            (showId, episodeId, trailerUrl, youtubeId360p, youtubeId480p, youtubeId720p, externalUrl, url360p, url480p, url720p, thumbnailUrl, imageUrl, trailerfileUrl, traileryoutubeUrl)
             VALUES
-            (${showId},'${trailerUrl}', '${req.body.file360p ? req.body.file360p : '' }', '${req.body.file480p ? req.body.file480p : ''}', '${req.body.file720p ? req.body.file720p : ''}', '${req.body.fileExternalURL ? req.body.fileExternalURL : ''}', '${video360pUrl}', '${video480pUrl}', '${video720pUrl}', '${thumbnailUrl}', '${imageUrl}','${trailerFileUrl}','${trailerYoutubeUrl}')
+            (${showId ? showId : null},${episodeId ? episodeId : null},'${trailerUrl}', '${req.body.file360p ? req.body.file360p : '' }', '${req.body.file480p ? req.body.file480p : ''}', '${req.body.file720p ? req.body.file720p : ''}', '${req.body.fileExternalURL ? req.body.fileExternalURL : ''}', '${video360pUrl}', '${video480pUrl}', '${video720pUrl}', '${thumbnailUrl}', '${imageUrl}','${trailerFileUrl}','${trailerYoutubeUrl}')
         `;
 
         await queryData(query);
@@ -104,6 +194,7 @@ router.get('/fetchSeriesById/:showId', async (req, res) => {
                             sr.Cast,
                             sr.Producer,
                             sr.Director,
+                            sr.ExternalId,
                             sr.PilotAirDate,
                             sr.thumbnailUrl,
                             sr.landscapeUrl,
@@ -157,6 +248,7 @@ router.get('/fetchSeriesById/:showId', async (req, res) => {
             const seriesObj = showData.SeriesDetails.find(series => series.SeriesId === row.SeriesId);
             seriesObj.Seasons.push({
                 SeasonId: row.SeasonId,
+                SeriesExternalId:result[0].ExternalId,
                 seasonNumber: row.seasonNumber,
                 SeasonTitle: row.SeasonTitle,
                 SeasonReleaseDate: row.SeasonReleaseDate,
@@ -187,7 +279,7 @@ router.get('/fetchSeriesById/:showId', async (req, res) => {
 
 router.post('/createSeries',upload.fields([{ name: 'thumbnailFile', maxCount: 1 }, { name: 'landscapeFile', maxCount: 1 }]) ,async (req, res) => {    
     console.log(req.body);
-    const { title, description ,genre, language, cast, producer, director, pilotAirDate } = req.body;
+    const { title, description ,genre, language, cast, producer, director, extId, pilotAirDate } = req.body;
     const { user_id } = req.user;
 
     try {
@@ -215,8 +307,8 @@ router.post('/createSeries',upload.fields([{ name: 'thumbnailFile', maxCount: 1 
 
         // Insert into the Series table using the ShowId
         const querySeries = `
-            INSERT INTO Series (SeriesName, SeriesDescription, Genre, Language, Cast, Producer, Director, PilotAirDate, ShowId, thumbnailUrl, landscapeUrl)
-            VALUES ('${title}', '${description}', '${genre}', '${language}', '${cast}', '${producer}', '${director}', '${pilotAirDate}', ${showId}, '${thumbnailUrl}', '${landscapeUrl}')
+            INSERT INTO Series (SeriesName, SeriesDescription, Genre, Language, Cast, Producer, Director, PilotAirDate, ShowId, thumbnailUrl, landscapeUrl, externalId)
+            VALUES ('${title}', '${description}', '${genre}', '${language}', '${cast}', '${producer}', '${director}', '${pilotAirDate}', ${showId}, '${thumbnailUrl}', '${landscapeUrl}', '${extId}')
         `;
 
         const resultSeries = await queryData(querySeries);
@@ -243,7 +335,7 @@ router.get('/fetchSeries', async (req, res) => {
         // SQL query to fetch shows and series where showTypeId = 2 and ownerId = user_id
         const query = `
             SELECT 
-                s.id, s.contentTypeId, s.ownerId, s.showTypeId, 
+                s.id,s.contentTypeId, s.ownerId, s.showTypeId, se.externalId,
                 se.SeriesName, se.SeriesDescription, se.Genre, se.Language, 
                 se.Cast, se.Producer, se.Director, se.PilotAirDate 
             FROM Shows s

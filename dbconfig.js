@@ -21,6 +21,16 @@ connection.connect((err) => {
     console.log('Connected to the database.');
 });
 
+setInterval(() => {
+    connection.ping((err) => {
+        if (err) {
+            console.error('Ping error:', err);
+        } else {
+            console.log('Ping successful, connection is alive.');
+        }
+    });
+}, 60000); 
+
 export const queryData = (query) => {
     return new Promise((resolve, reject) => {
         connection.query(query, (error, results) => {
