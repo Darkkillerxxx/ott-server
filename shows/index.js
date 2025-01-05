@@ -27,7 +27,7 @@ router.post('/uploadEpisode',
         { name: 'stillImageFile', maxCount: 1 }, 
     ]), async (req, res) => {
     try {
-        const { seriesId, seasonId, title, description, availabilityType, stillImageUrl} = req.body;
+        const { seriesId, seasonId, title, description, availabilityType, airDate , stillImageUrl} = req.body;
         console.log(req.body); // Contains form data like trailerType, videoType, etc.
         console.log(req.files); // Contains the uploaded files
 
@@ -45,9 +45,9 @@ router.post('/uploadEpisode',
       
         const query = `
             INSERT INTO episodes 
-            (seriesId, seasonId, title, description, availabilityType, stillImageUrl)
+            (seriesId, seasonId, title, description, availabilityType, stillImageUrl, airDate)
             VALUES
-            (${seriesId},'${seasonId}', '${title}', '${description}', '${availabilityType}', '${episodeStillUrl}');
+            (${seriesId},'${seasonId}', '${title}', '${description}', '${availabilityType}', '${episodeStillUrl}', '${airDate}');
         `;
 
         const result = await queryData(query);
@@ -59,11 +59,75 @@ router.post('/uploadEpisode',
     }
 });
 
-router.get('/getSeriesList',async(req,res)=>{
+
+router.get('/getMoviesList/:searchText?',async(req,res)=>{
     try{
         const { user_id } = req.user;
+        const { searchText } = req.params;
 
-        const query = `SELECT 
+        let query = `SELECT 
+                m.MovieID AS MovieId,
+                m.Name AS MovieName,
+                m.Description AS MovieDescription,
+                m.Genre,
+                m.Language,
+                m.Type AS MovieType,
+                m.Cast AS MovieCast,
+                m.Producer,
+                m.Director,
+                m.Duration,
+                m.ReleaseDate,
+                s.id AS ShowId,
+                s.contentTypeId AS ShowContentTypeId,
+                s.ownerId AS ShowOwnerId,
+                s.showTypeId AS ShowTypeId,
+                sc.contentId AS ShowContentId,
+                sc.youtubeId360p,
+                sc.youtubeId480p,
+                sc.youtubeId720p,
+                sc.externalUrl,
+                sc.url360p,
+                sc.url480p,
+                sc.url720p,
+                sc.thumbnailUrl,
+                sc.imageUrl,
+                sc.trailerUrl,
+                sc.trailerfileUrl,
+                sc.traileryoutubeUrl,
+                sc.SeasonId,
+                sc.SeriesId,
+                sc.episodeId
+            FROM 
+                Movies m
+            LEFT JOIN 
+                Shows s ON m.ShowId = s.id
+            LEFT JOIN 
+                showContent sc ON s.id = sc.showId
+                    WHERE 
+                        s.ownerId = ${user_id}`;
+
+        if(searchText){
+            query = query +  ` AND m.Name LIKE '%${searchText}%'`
+        }
+        
+        console.log(query);
+        
+        const result = await queryData(query);
+
+        res.status(200).json({ message: 'Movies Fetch Successfully!',data:result});
+    }
+    catch(error){
+        console.log(error);
+        res.status(500).json({message:'An error occured during fetching Movies'})
+    }
+})
+
+router.get('/getSeriesList/:searchText?',async(req,res)=>{
+    try{
+        const { user_id } = req.user;
+        const { searchText } = req.params;
+
+        let query = `SELECT 
                         s.id AS ShowId,
                         s.contentTypeId,
                         s.ownerId,
@@ -86,6 +150,12 @@ router.get('/getSeriesList',async(req,res)=>{
                         series se ON s.id = se.ShowId
                     WHERE 
                         s.ownerId = ${user_id}`;
+
+        if(searchText){
+            query = query +  ` AND se.SeriesName LIKE '%${searchText}%'`
+        }
+        
+        console.log(query);
         
         const result = await queryData(query);
 
@@ -97,11 +167,12 @@ router.get('/getSeriesList',async(req,res)=>{
     }
 })
 
+
 router.get('/getEpisodeListForSeason/:seasonId',async(req,res)=>{
     try{        
         const { seasonId } = req.params;
 
-        const query = `SELECT * FROM episodes WHERE seasonId = ${seasonId}`;
+        const query = `SELECT * FROM episodes WHERE seasonId = ${seasonId} ORDER BY airDate ASC`;
 
         const result = await queryData(query);
         res.status(200).json({ message: 'Files uploaded and data saved successfully!',data:result });
@@ -110,6 +181,49 @@ router.get('/getEpisodeListForSeason/:seasonId',async(req,res)=>{
         res.status(500).json({message:'An Error occured while fetching episodes'});
     }
 })
+
+
+router.delete('/deleteEpisode/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        if (!id) {
+            return res.status(400).json({ message: 'Episode ID is required' });
+        }
+
+        // Fetch episode details to identify seriesId and episodeId
+        const fetchEpisodeQuery = `SELECT seriesId, id AS episodeId FROM episodes WHERE id = ${id}`;
+        const episode = await queryData(fetchEpisodeQuery);
+
+        if (episode.length === 0) {
+            return res.status(404).json({ message: 'Episode not found' });
+        }
+
+        const { seriesId, episodeId } = episode[0];
+
+        // Delete records from showContent table based on seriesId and episodeId
+        const deleteShowContentQuery = `
+            DELETE FROM showContent 
+            WHERE episodeId = ${episodeId}
+        `;
+        console.log(deleteShowContentQuery)
+        await queryData(deleteShowContentQuery);
+
+        // Delete the episode record
+        const deleteEpisodeQuery = `DELETE FROM episodes WHERE id = ${id}`;
+        const result = await queryData(deleteEpisodeQuery);
+
+        if (result.affectedRows > 0) {
+            res.status(200).json({ message: 'Episode and associated content deleted successfully!' });
+        } else {
+            res.status(404).json({ message: 'Episode not found' });
+        }
+    } catch (error) {
+        console.error('Error deleting episode and content:', error);
+        res.status(500).json({ message: 'An error occurred while deleting the episode and its content' });
+    }
+});
+
 
 router.post('/uploadContent', 
     upload.fields([
@@ -153,8 +267,8 @@ router.post('/uploadContent',
         }
 
         // Thumbnail and movie image URLs
-        const thumbnailUrl = req.files.thumbnailImage ? `/uploads/${req.files.thumbnailImage[0].filename}` : '';
-        const imageUrl = req.files.movieImage ? `/uploads/${req.files.movieImage[0].filename}` : '';
+        const thumbnailUrl = req.files.thumbnailImage ? `/uploads/${req.files.thumbnailImage[0].filename}` : req.body.thumbnailImageExtUrl ;
+        const imageUrl = req.files.movieImage ? `/uploads/${req.files.movieImage[0].filename}` : req.body.movieImageExtUrl;
 
         // Insert the data into the database
         const showId = req.body.showId; // Get showId from the form data
